@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile holding player identity, rank, and competitive ratings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "displayName": { "type": "string", "maxLength": 50 },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "rank": { "type": "string", "enum": ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Legend"] },
+        "xp": { "type": "number" },
+        "xpToNextLevel": { "type": "number" },
+        "level": { "type": "number" },
+        "mmr": { "type": "number" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["uid", "email", "username", "displayName", "rank", "xp", "level", "mmr", "createdAt"]
+    },
+    "UserWallet": {
+      "title": "UserWallet",
+      "description": "Financial wallet summary for available and locked balances",
+      "type": "object",
+      "properties": {
+        "availableBalance": { "type": "number" },
+        "lockedBalance": { "type": "number" },
+        "totalDeposited": { "type": "number" },
+        "totalWinnings": { "type": "number" },
+        "totalWithdrawn": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["availableBalance", "lockedBalance", "totalDeposited", "totalWinnings", "totalWithdrawn"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Auditable financial ledger record for deposits, entry fees, prizes, and withdrawals",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["Deposit", "Entry Fee", "Prize", "Withdrawal", "Refund", "Adjustment"] },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Processing", "Completed", "Failed", "Approved", "Rejected"] },
+        "timestamp": { "type": "number" },
+        "description": { "type": "string", "maxLength": 200 },
+        "matchId": { "type": "string", "maxLength": 128 },
+        "paymentMethod": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "userId", "type", "amount", "status", "timestamp", "description"]
+    },
+    "MatchHistory": {
+      "title": "MatchHistory",
+      "description": "Permanent match scorecard record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "matchId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "gameMode": { "type": "string", "enum": ["1v1", "2v2", "4v4", "mega_tournament"] },
+        "isWinner": { "type": "boolean" },
+        "userScore": { "type": "number" },
+        "opponentName": { "type": "string", "maxLength": 50 },
+        "opponentScore": { "type": "number" },
+        "entryFee": { "type": "number" },
+        "prizeAmount": { "type": "number" },
+        "mmrChange": { "type": "number" },
+        "xpGained": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "matchId", "userId", "gameMode", "isWinner", "userScore", "entryFee", "prizeAmount", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications for matches, prizes, deposits, and system alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "maxLength": 50 },
+        "title": { "type": "string", "maxLength": 100 },
+        "message": { "type": "string", "maxLength": 300 },
+        "timestamp": { "type": "number" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "type", "title", "message", "timestamp", "isRead"]
+    },
+    "Leaderboard": {
+      "title": "Leaderboard",
+      "description": "Public player ranking record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "displayName": { "type": "string", "maxLength": 50 },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "rankTier": { "type": "string" },
+        "mmr": { "type": "number" },
+        "xp": { "type": "number" },
+        "wins": { "type": "number" },
+        "winRate": { "type": "number" },
+        "accuracy": { "type": "number" }
+      },
+      "required": ["uid", "username", "displayName", "rankTier", "mmr", "wins"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile document containing player information"
+    },
+    "/users/{userId}/wallet/summary": {
+      "schema": { "$ref": "#/entities/UserWallet" },
+      "description": "User wallet balance summary"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "User financial transactions ledger"
+    },
+    "/users/{userId}/matchHistory/{matchHistoryId}": {
+      "schema": { "$ref": "#/entities/MatchHistory" },
+      "description": "User completed match history records"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "User personal notifications"
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/Leaderboard" },
+      "description": "Public leaderboard rankings"
+    }
+  }
+}

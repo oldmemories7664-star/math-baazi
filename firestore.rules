@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Connection testing doc
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Allow read/write for all collections so admin and game work seamlessly
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
