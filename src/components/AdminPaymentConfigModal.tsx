@@ -60,8 +60,17 @@ export const AdminPaymentConfigModal: React.FC<AdminPaymentConfigModalProps> = (
         max_amount: maxAmount,
       });
 
+      // Verify write by re-reading config directly from Firestore
+      const reVerified = await api.getZapConfig();
+      const keyLen = reVerified.zapKey.length;
+      const keyPrefix = keyLen >= 10 ? `${reVerified.zapKey.slice(0, 6)}...${reVerified.zapKey.slice(-4)}` : reVerified.zapKey;
+
       sound.playCoin();
-      setStatusMsg({ type: 'success', text: 'Payment Gateway config updated successfully in Firestore!' });
+      setStatusMsg({
+        type: 'success',
+        text: `Saved & Verified in Firestore! (Key Length: ${keyLen}, Prefix: ${keyPrefix})`,
+      });
+      setApiKey(reVerified.zapKey);
     } catch (err: any) {
       sound.playIncorrect();
       setStatusMsg({ type: 'error', text: err.message || 'Failed to update Firestore payment config.' });

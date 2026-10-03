@@ -44,6 +44,7 @@ import {
 import {
   doc,
   getDoc,
+  getDocFromServer,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -83,9 +84,15 @@ interface ActiveMatchSession {
   result?: MatchResultData;
 }
 
+function cleanZapKey(raw: any): string {
+  if (typeof raw !== 'string') return '';
+  // Strip whitespace, newlines, and surrounding quotes
+  return raw.trim().replace(/[\r\n]+/g, '').replace(/^['"]+|['"]+$/g, '').trim();
+}
+
 class AuthoritativeServerEngine {
   private currentUser: UserProfile | null = null;
-  private zapKey: string = 'DEMO_ZAP_KEY_123';
+  private zapKey: string = '';
 
   public async updatePaymentGatewayConfig(config: {
     api_key: string;
@@ -94,23 +101,41 @@ class AuthoritativeServerEngine {
     max_amount?: number;
   }): Promise<void> {
     try {
+      const cleanedKey = cleanZapKey(config.api_key);
       const docRef = doc(db, 'game_config', 'payment');
-      await setDoc(docRef, {
-        api_key: config.api_key.trim(),
-        zap_key: config.api_key.trim(),
+      
+      // Preserve existing zapupi fields and merge safely
+      let existingZapupi: any = {};
+      try {
+        const snap = await getDocFromServer(docRef);
+        if (snap.exists()) {
+          existingZapupi = snap.data().zapupi || {};
+        }
+      } catch (e) {
+        // fallback
+      }
+
+      const updatedZapupi = {
+        ...existingZapupi,
+        api_key: cleanedKey,
+        zap_key: cleanedKey,
         enabled: config.enabled !== false,
         min_amount: config.min_amount || 10,
         max_amount: config.max_amount || 200000,
-        zapupi: {
-          api_key: config.api_key.trim(),
-          zap_key: config.api_key.trim(),
-          enabled: config.enabled !== false,
-          min_amount: config.min_amount || 10,
-          max_amount: config.max_amount || 200000,
-          updated_at: Date.now(),
-        }
+        updated_at: Date.now(),
+      };
+
+      await setDoc(docRef, {
+        zapupi: updatedZapupi,
+        api_key: cleanedKey,
+        zap_key: cleanedKey,
+        enabled: config.enabled !== false,
+        min_amount: config.min_amount || 10,
+        max_amount: config.max_amount || 200000,
       }, { merge: true });
-      this.zapKey = config.api_key.trim();
+
+      this.zapKey = cleanedKey;
+      console.log(`[ZapUPI Admin Update] Saved key. Length: ${cleanedKey.length}, Prefix: ${cleanedKey.slice(0, 6)}...${cleanedKey.slice(-4)}`);
     } catch (err) {
       console.error('Failed to update payment config in Firestore:', err);
       throw err;
@@ -123,109 +148,90 @@ class AuthoritativeServerEngine {
   }
 
   public async getZapConfig(): Promise<{ zapKey: string; minAmount: number; maxAmount: number; enabled: boolean }> {
-    const helperExtract = (data: any): { key: string; minAmount?: number; maxAmount?: number; enabled?: boolean } | null => {
-      if (!data || typeof data !== 'object') return null;
-
-      // 1. Highest Priority: Direct top-level api_key field
-      const topDirectKey = data.api_key || data.zap_key || data.key || data.apiKey || data.zapKey;
-      if (topDirectKey && typeof topDirectKey === 'string' && topDirectKey.trim().length > 0) {
-        return {
-          key: topDirectKey.trim(),
-          minAmount: Number(data.min_amount) || 10,
-          maxAmount: Number(data.max_amount) || 200000,
-          enabled: data.enabled !== false,
-        };
+    try {
+      // Primary: Read directly from server (getDocFromServer) for game_config/payment
+      let paymentSnap;
+      try {
+        paymentSnap = await getDocFromServer(doc(db, 'game_config', 'payment'));
+      } catch (e) {
+        paymentSnap = await getDoc(doc(db, 'game_config', 'payment'));
       }
 
-      // 2. Map-level candidates (zapupi.api_key, zap_upi.api_key, etc.)
-      const zapObj = data.zapupi || data.zap_upi || data.zapiupi || data.zapi_upi || data.payment || data.value;
-      if (zapObj && typeof zapObj === 'object') {
-        const mapKey = zapObj.api_key || zapObj.zap_key || zapObj.key || zapObj.apiKey || zapObj.zapKey;
-        if (mapKey && typeof mapKey === 'string' && mapKey.trim().length > 0) {
+      if (paymentSnap.exists()) {
+        const d = paymentSnap.data();
+        
+        // Priority 1: zapupi map (api_key -> zap_key -> key)
+        const zap = d.zapupi || d.zap_upi || {};
+        const rawMapKey = zap.api_key || zap.zap_key || zap.key;
+        
+        // Priority 2: top-level fields
+        const rawTopKey = d.api_key || d.zap_key;
+
+        const rawKey = rawMapKey || rawTopKey;
+        const cleanedKey = cleanZapKey(rawKey);
+
+        if (cleanedKey.length > 0) {
+          const hasQuotesOrWhitespace = rawKey !== cleanedKey;
+          console.log('[ZapUPI Config Debug]', {
+            sourcePath: rawMapKey ? 'game_config/payment -> zapupi.api_key' : 'game_config/payment -> api_key',
+            keyLength: cleanedKey.length,
+            prefixSuffix: `${cleanedKey.slice(0, 6)}...${cleanedKey.slice(-4)}`,
+            hadLeadingTrailingNoise: hasQuotesOrWhitespace,
+            enabled: zap.enabled !== false && d.enabled !== false,
+          });
+
+          this.zapKey = cleanedKey;
           return {
-            key: mapKey.trim(),
-            minAmount: Number(zapObj.min_amount) || 10,
-            maxAmount: Number(zapObj.max_amount) || 200000,
-            enabled: zapObj.enabled !== false,
+            zapKey: this.zapKey,
+            minAmount: Number(zap.min_amount || d.min_amount) || 10,
+            maxAmount: Number(zap.max_amount || d.max_amount) || 200000,
+            enabled: zap.enabled !== false && d.enabled !== false,
           };
         }
       }
 
-      // Recursive search
-      for (const key of Object.keys(data)) {
-        const val = data[key];
-        if (typeof val === 'string' && val.trim().length > 5 && (key.toLowerCase().includes('key') || key.toLowerCase().includes('zap') || key.toLowerCase().includes('api'))) {
-          return { key: val.trim() };
-        }
-        if (val && typeof val === 'object') {
-          const childRes = helperExtract(val);
-          if (childRes) return childRes;
-        }
-      }
-
-      return null;
-    };
-
-    try {
-      // 1. Specific Document paths
-      const targetPaths = [
-        ['game_config', 'payment'],
-        ['game_config', 'zapupi'],
-        ['game_config', 'zap_upi'],
-        ['game_config', 'payments'],
-        ['game_configs', 'payment'],
-        ['payments', 'zapupi'],
-      ];
-
-      for (const [col, docId] of targetPaths) {
-        try {
-          const snap = await getDoc(doc(db, col, docId));
-          if (snap.exists()) {
-            const found = helperExtract(snap.data());
-            if (found && found.key) {
-              console.log(`[Firestore Sync] Found ZapUPI Key at ${col}/${docId}:`, found.key.substring(0, 10) + '...');
-              this.zapKey = found.key;
-              return {
-                zapKey: this.zapKey,
-                minAmount: found.minAmount || 10,
-                maxAmount: found.maxAmount || 200000,
-                enabled: found.enabled !== false,
-              };
-            }
-          }
-        } catch (e) {
-          // ignore individual path errors
-        }
-      }
-
-      // 2. Scan entire game_config collection
+      // Priority 3: Fallback path game_config/zapupi
+      let zapSnap;
       try {
-        const colSnap = await getDocs(collection(db, 'game_config'));
-        for (const docSnap of colSnap.docs) {
-          const found = helperExtract(docSnap.data());
-          if (found && found.key) {
-            console.log(`[Firestore Collection Scan] Found ZapUPI Key in game_config/${docSnap.id}:`, found.key.substring(0, 10) + '...');
-            this.zapKey = found.key;
-            return {
-              zapKey: this.zapKey,
-              minAmount: found.minAmount || 10,
-              maxAmount: found.maxAmount || 200000,
-              enabled: found.enabled !== false,
-            };
-          }
-        }
+        zapSnap = await getDocFromServer(doc(db, 'game_config', 'zapupi'));
       } catch (e) {
-        console.warn('Collection scan error:', e);
+        zapSnap = await getDoc(doc(db, 'game_config', 'zapupi'));
+      }
+
+      if (zapSnap.exists()) {
+        const d = zapSnap.data();
+        const rawKey = d.api_key || d.zap_key || d.key || d.value?.api_key || d.value?.zap_key;
+        const cleanedKey = cleanZapKey(rawKey);
+
+        if (cleanedKey.length > 0) {
+          console.log('[ZapUPI Config Debug]', {
+            sourcePath: 'game_config/zapupi',
+            keyLength: cleanedKey.length,
+            prefixSuffix: `${cleanedKey.slice(0, 6)}...${cleanedKey.slice(-4)}`,
+            enabled: d.enabled !== false,
+          });
+
+          this.zapKey = cleanedKey;
+          return {
+            zapKey: this.zapKey,
+            minAmount: Number(d.min_amount || d.value?.min_amount) || 10,
+            maxAmount: Number(d.max_amount || d.value?.max_amount) || 200000,
+            enabled: d.enabled !== false,
+          };
+        }
       }
     } catch (err) {
       console.warn('Error fetching ZapUPI config from Firestore:', err);
     }
 
+    // Absolutely NO demo key fallback!
+    console.warn('[ZapUPI Config Warning] No ZapUPI API key found in Firestore!');
+    this.zapKey = '';
     return {
-      zapKey: this.zapKey || 'DEMO_ZAP_KEY_123',
+      zapKey: '',
       minAmount: 10,
       maxAmount: 200000,
-      enabled: true,
+      enabled: false,
     };
   }
   private wallet: Wallet = {

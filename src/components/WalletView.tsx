@@ -75,6 +75,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
       const zapKey = zapConfig.zapKey;
       const currentUser = api.getCurrentUser();
 
+      if (!zapConfig.enabled) {
+        setDepositError('Deposits abhi disabled hain. Kripya baad mein try karein.');
+        setIsDepositProcessing(false);
+        sound.playIncorrect();
+        return;
+      }
+
+      if (!zapKey || zapKey.trim().length === 0) {
+        setDepositError('ZapUPI API Key configure nahi hai! Admin se game_config/payment -> zapupi.api_key set karwayen.');
+        setIsDepositProcessing(false);
+        sound.playIncorrect();
+        return;
+      }
+
       if (depositAmount < zapConfig.minAmount) {
         setDepositError(`Minimum deposit amount is ₹${zapConfig.minAmount}.`);
         setIsDepositProcessing(false);
@@ -89,11 +103,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
         return;
       }
 
+      console.log('[ZapUPI createOrder Debug]', {
+        keyLength: zapKey.length,
+        prefixSuffix: `${zapKey.slice(0, 6)}...${zapKey.slice(-4)}`,
+        amount: depositAmount,
+      });
+
       if (window.ZapUPI) {
         window.ZapUPI.setPaymentCallbacks({
           onSuccess: async (orderId: string) => {
             try {
-              await api.deposit(depositAmount, `ZapUPI Instant Gateway (${orderId})`);
+              await api.deposit(depositAmount, `ZapUPI Payment (${orderId})`);
               sound.playCoin();
               setDepositStatus('success');
             } catch (err: any) {
@@ -132,33 +152,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 window.ZapUPI.loadPayment(paymentUrl);
               }
             },
-            onError: async (err: any) => {
+            onError: (err: any) => {
               const errStr = typeof err === 'string' ? err : (err?.message || JSON.stringify(err));
-              console.warn('ZapUPI Notice:', errStr);
-              
-              if (errStr.toLowerCase().includes('invalid zap key')) {
-                setDepositError('Invalid Zap Key! Please update your full active ZapUPI API key in Firebase Console (game_config/payment -> zapupi.api_key). Completing test deposit...');
-              }
-
-              try {
-                await api.deposit(depositAmount, 'ZapUPI Instant Gateway (Test Mode)');
-                sound.playCoin();
-                setDepositStatus('success');
-              } catch (fallbackErr: any) {
-                sound.playIncorrect();
-                setDepositStatus('failed');
-                setDepositError(fallbackErr.message || 'Payment Order Error');
-              } finally {
-                setIsDepositProcessing(false);
-              }
+              console.error('[ZapUPI Order Error]', errStr);
+              sound.playIncorrect();
+              setDepositStatus('failed');
+              setDepositError(`Payment Order Error: ${errStr}`);
+              setIsDepositProcessing(false);
             },
           }
         );
       } else {
-        // Fallback when script is loading or blocked
-        await api.deposit(depositAmount, 'ZapUPI Payment Gateway');
-        sound.playCoin();
-        setDepositStatus('success');
+        sound.playIncorrect();
+        setDepositStatus('failed');
+        setDepositError('Payment gateway SDK load nahi hua. Page refresh karke dobara try karein.');
         setIsDepositProcessing(false);
       }
     } catch (err: any) {
